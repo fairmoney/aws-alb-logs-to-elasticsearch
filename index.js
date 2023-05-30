@@ -39,7 +39,7 @@ if (!region) {
 
 const indexPrefix = process.env['index'] || 'elblogs';
 const index = indexPrefix + '-' + indexTimestamp; // adds a timestamp to index. Example: elblogs-2016.03.31
-const doctype = process.env['doctype'] || 'elb-access-logs';
+const doctype = '_doc'; // ES7+ doesn't support other doctypes
 
 /* Globals */
 var s3 = new AWS.S3();
@@ -118,6 +118,8 @@ function postDocumentToES(doc, context) {
             body += chunk;
         });
         httpResp.on('end', function (chunk) {
+            console.log('Response body:', body);  // Print the response body from Elasticsearch/OpenSearch
+
             numDocsAdded ++;
             if (numDocsAdded === totLogLines) {
                 // Mark lambda success.  If not done so, it will be retried.
@@ -127,6 +129,7 @@ function postDocumentToES(doc, context) {
         });
     }, function(err) {
         console.log('Error: ' + err);
+        console.log('Response:', err.response);  // Print the response body from Elasticsearch/OpenSearch
         console.log(numDocsAdded + 'of ' + totLogLines + ' log records added to ES.');
         context.fail();
     });
@@ -147,6 +150,12 @@ exports.handler = function(event, context) {
     var recordStream = new stream.Transform({objectMode: true})
     recordStream._transform = function(line, encoding, done) {
         var logRecord = parse(line.toString());
+
+        // Prevent "illegal_argument_exception" parsing errors
+        if (logRecord.matched_rule_priority === '-') {
+            logRecord.matched_rule_priority = 0;
+        }
+
         var serializedRecord = JSON.stringify(logRecord);
         this.push(serializedRecord);
         totLogLines ++;
