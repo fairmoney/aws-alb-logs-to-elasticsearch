@@ -18,6 +18,7 @@
 /* Imports */
 var AWS = require('aws-sdk');
 var LineStream = require('byline').LineStream;
+var Batch = require('batch');
 var parse = require('alb-log-parser');  // alb-log-parser  https://github.com/igtm/node-alb-log-parser
 var path = require('path');
 var stream = require('stream');
@@ -61,7 +62,7 @@ console.log('Initializing AWS Lambda Function');
  * Get the log file from the given S3 bucket and key.  Parse it and add
  * each log record to the ES domain.
  */
-function s3LogsToES(bucket, key, context, lineStream, recordStream) {
+function s3LogsToES(bucket, key, context, lineStream, recordStream, batch) {
     // Note: The Lambda function should be configured to filter for .log files
     // (as part of the Event Source "suffix" setting).
     if (!esEndpoint) {
@@ -76,6 +77,7 @@ function s3LogsToES(bucket, key, context, lineStream, recordStream) {
       .pipe(zlib.createGunzip())
       .pipe(lineStream)
       .pipe(recordStream)
+      .pipe(batch)
       .on('data', function(parsedEntry) {
             postDocumentToES(parsedEntry, context);
       });
@@ -97,7 +99,7 @@ function postDocumentToES(doc, context) {
     var req = new AWS.HttpRequest(endpoint);
 
     req.method = 'POST';
-    req.path = path.join('/', index, doctype);
+    req.path = path.join('/_bulk', index, doctype);
     req.region = region;
     req.body = doc;
     req.headers['presigned-expires'] = false;
@@ -146,6 +148,7 @@ exports.handler = function(event, context) {
     * Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
     */
     var lineStream = new LineStream();
+    var batch = new Batch({size: 20})
     // A stream of log records, from parsing each log line
     var recordStream = new stream.Transform({objectMode: true})
     recordStream._transform = function(line, encoding, done) {
@@ -165,6 +168,6 @@ exports.handler = function(event, context) {
     event.Records.forEach(function(record) {
         var bucket = record.s3.bucket.name;
         var objKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
-        s3LogsToES(bucket, objKey, context, lineStream, recordStream);
+        s3LogsToES(bucket, objKey, context, lineStream, recordStream, batch);
     });
 }
