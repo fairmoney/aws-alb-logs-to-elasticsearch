@@ -154,13 +154,24 @@ exports.handler = function(event, context) {
     recordStream._transform = function(batch, encoding, done) {
         var result = []
         batch.forEach(function(line, index) {
-            var logRecord = parse(line.toString());
+            let logRecord
+            if (line.startsWith("{")) {
+                try {
+                    logRecord = JSON.parse(line)
+                } catch (e) {
+                    console.error(e)
+                    logRecord = NaN
+                }
+            } else {
+                logRecord = parse(line.toString());
 
-            // Prevent "illegal_argument_exception" parsing errors
-            if (logRecord.matched_rule_priority === '-') {
-                logRecord.matched_rule_priority = 0;
+                // Prevent "illegal_argument_exception" parsing errors
+                if (logRecord.matched_rule_priority === '-') {
+                    logRecord.matched_rule_priority = 0;
+                }
             }
-            this[index] = logRecord
+            if (!isNaN(logRecord))
+                this[index] = logRecord
         }, result)
 
         var serializedRecord = JSON.stringify(result);
