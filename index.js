@@ -18,7 +18,7 @@
 /* Imports */
 var AWS = require('aws-sdk');
 var LineStream = require('byline').LineStream;
-var Batch = require('batch');
+var BatchStream = require('batch-stream');
 var parse = require('alb-log-parser');  // alb-log-parser  https://github.com/igtm/node-alb-log-parser
 var path = require('path');
 var stream = require('stream');
@@ -148,7 +148,7 @@ exports.handler = function(event, context) {
     * Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
     */
     var lineStream = new LineStream();
-    var batch = new Batch({size: 20})
+    var batch = new BatchStream({size: 20})
     // A stream of log records, from parsing each log line
     var recordStream = new stream.Transform({objectMode: true})
     recordStream._transform = function(batch, encoding, done) {
