@@ -76,8 +76,8 @@ function s3LogsToES(bucket, key, context, lineStream, recordStream, batch) {
      s3Stream
       .pipe(zlib.createGunzip())
       .pipe(lineStream)
-      .pipe(recordStream)
       .pipe(batch)
+      .pipe(recordStream)
       .on('data', function(parsedEntry) {
             postDocumentToES(parsedEntry, context);
       });
@@ -151,15 +151,19 @@ exports.handler = function(event, context) {
     var batch = new Batch({size: 20})
     // A stream of log records, from parsing each log line
     var recordStream = new stream.Transform({objectMode: true})
-    recordStream._transform = function(line, encoding, done) {
-        var logRecord = parse(line.toString());
+    recordStream._transform = function(batch, encoding, done) {
+        var result = []
+        batch.forEach(function(line, index) {
+            var logRecord = parse(line.toString());
 
-        // Prevent "illegal_argument_exception" parsing errors
-        if (logRecord.matched_rule_priority === '-') {
-            logRecord.matched_rule_priority = 0;
-        }
+            // Prevent "illegal_argument_exception" parsing errors
+            if (logRecord.matched_rule_priority === '-') {
+                logRecord.matched_rule_priority = 0;
+            }
+            this[index] = logRecord
+        }, result)
 
-        var serializedRecord = JSON.stringify(logRecord);
+        var serializedRecord = JSON.stringify(result);
         this.push(serializedRecord);
         totLogLines ++;
         done();
