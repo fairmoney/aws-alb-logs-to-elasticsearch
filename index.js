@@ -149,14 +149,24 @@ exports.handler = function(event, context) {
     // A stream of log records, from parsing each log line
     var recordStream = new stream.Transform({objectMode: true})
     recordStream._transform = function(line, encoding, done) {
-        var logRecord = parse(line.toString());
+        let logLine = line.toString();
+        let logRecord;
+        if (logLine.match(/^\{/)) {
+            logRecord = JSON.parse(logLine)
 
-        // Prevent "illegal_argument_exception" parsing errors
-        if (logRecord.matched_rule_priority === '-') {
-            logRecord.matched_rule_priority = 0;
+            if (Number.isInteger(logRecord.timestamp)) {
+                logRecord.timestamp = new Date(logRecord.timestamp)
+            } else {
+                logRecord.timestamp = new Date()
+            }
+        } else {
+            logRecord = parse(logLine);
+            // Prevent "illegal_argument_exception" parsing errors
+            if (logRecord.matched_rule_priority === '-') {
+                logRecord.matched_rule_priority = 0;
+            }
         }
-
-        var serializedRecord = JSON.stringify(logRecord);
+        let serializedRecord = JSON.stringify(logRecord);
         this.push(serializedRecord);
         totLogLines ++;
         done();
