@@ -16,35 +16,38 @@
  */
 
 /* Imports */
-var AWS = require('aws-sdk');
-var LineStream = require('byline').LineStream;
-var parse = require('alb-log-parser');  // alb-log-parser  https://github.com/igtm/node-alb-log-parser
-var path = require('path');
-var stream = require('stream');
+const AWS = require('aws-sdk');
+const LineStream = require('byline').LineStream;
+const BatchStream = require('batch-stream');
+const parse = require('alb-log-parser');  // alb-log-parser  https://github.com/igtm/node-alb-log-parser
+const path = require('path');
+const stream = require('stream');
 const zlib = require('zlib');
 
-var indexTimestamp = new Date().toISOString().replace(/\-/g, '.').replace(/T.+/, '');
+let indexTimestamp = new Date().toISOString().replace(/\-/g, '.').replace(/T.+/, '');
 const esEndpoint = process.env['es_endpoint'];
 var endpoint = '';
 if (!esEndpoint) {
-  console.log('ERROR: Environment variable es_endpoint not set');
+    console.error('ERROR: Environment variable es_endpoint not set');
 } else {
-  endpoint =  new AWS.Endpoint(esEndpoint);
+    endpoint =  new AWS.Endpoint(esEndpoint);
 }
 
 const region = process.env['region'];
 if (!region) {
-    console.log("Error. Environment variable region is not defined")
+    console.error("Error. Environment variable region is not defined")
 }
+
+const is_local = process.env['is_local'];
 
 const indexPrefix = process.env['index'] || 'elblogs';
 const index = indexPrefix + '-' + indexTimestamp; // adds a timestamp to index. Example: elblogs-2016.03.31
-const doctype = '_doc'; // ES7+ doesn't support other doctypes
+const bulkPath = '_bulk';
 
 /* Globals */
-var s3 = new AWS.S3();
-var totLogLines = 0;    // Total number of log lines in the file
-var numDocsAdded = 0;   // Number of log lines added to ES so far
+const s3 = new AWS.S3();
+let totLogLines = 0;    // Total number of log lines in the file
+let numDocsAdded = 0;   // Number of log lines added to ES so far
 
 /*
  * The AWS credentials are picked up from the environment.
@@ -53,7 +56,7 @@ var numDocsAdded = 0;   // Number of log lines added to ES so far
  * make sure to apply a policy that permits ES domain operations
  * to the role.
  */
-var creds = new AWS.EnvironmentCredentials('AWS');
+const creds = new AWS.EnvironmentCredentials('AWS');
 
 console.log('Initializing AWS Lambda Function');
 
@@ -61,31 +64,34 @@ console.log('Initializing AWS Lambda Function');
  * Get the log file from the given S3 bucket and key.  Parse it and add
  * each log record to the ES domain.
  */
-function s3LogsToES(bucket, key, context, lineStream, recordStream) {
+function s3LogsToES(bucket, key, context, recordStream) {
     // Note: The Lambda function should be configured to filter for .log files
     // (as part of the Event Source "suffix" setting).
     if (!esEndpoint) {
-      var error = new Error('ERROR: Environment variable es_endpoint not set')
-      context.fail(error);
+        var error = new Error('ERROR: Environment variable es_endpoint not set')
+        context.fail(error);
     }
 
-    var s3Stream = s3.getObject({Bucket: bucket, Key: key}).createReadStream();
+    const s3Stream = s3.getObject({Bucket: bucket, Key: key}).createReadStream();
+    const gunzip = zlib.createGunzip();
+    const lineStream = new LineStream();
+    const batch = new BatchStream({size: 100});
 
     // Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
-     s3Stream
-      .pipe(zlib.createGunzip())
-      .pipe(lineStream)
-      .pipe(recordStream)
-      .on('data', function(parsedEntry) {
+    s3Stream
+        .pipe(gunzip)
+        .pipe(lineStream)
+        .pipe(batch)
+        .pipe(recordStream)
+        .on('data', function(parsedEntry) {
             postDocumentToES(parsedEntry, context);
-      });
-
-    s3Stream.on('error', function() {
-        console.log(
-            'Error getting object "' + key + '" from bucket "' + bucket + '".  ' +
-            'Make sure they exist and your bucket is in the same region as this function.');
-        context.fail();
-    });
+        })
+        .on('error', function() {
+            console.log(
+                'Error getting object "' + key + '" from bucket "' + bucket + '".  ' +
+                'Make sure they exist and your bucket is in the same region as this function.');
+            context.fail();
+        });
 }
 
 /*
@@ -97,18 +103,21 @@ function postDocumentToES(doc, context) {
     var req = new AWS.HttpRequest(endpoint);
 
     req.method = 'POST';
-    req.path = path.join('/', index, doctype);
+    req.path = path.join('/', index, bulkPath);
     req.region = region;
     req.body = doc;
     req.headers['presigned-expires'] = false;
     req.headers['Host'] = endpoint.host;
-    // needed to make it work with ES 6.x
-    // https://www.elastic.co/blog/strict-content-type-checking-for-elasticsearch-rest-requests
     req.headers['Content-Type'] = 'application/json';
 
-    // Sign the request (Sigv4)
-    var signer = new AWS.Signers.V4(req, 'es');
-    signer.addAuthorization(creds, new Date());
+    if (is_local) {
+        // local dev credentials admin:admin
+        req.headers['Authorization'] = 'Basic YWRtaW46YWRtaW4=';
+    } else {
+        // Sign the request (Sigv4)
+        let signer = new AWS.Signers.V4(req, 'es');
+        signer.addAuthorization(creds, new Date());
+    }
 
     // Post document to ES
     var send = new AWS.NodeHttpClient();
@@ -118,9 +127,10 @@ function postDocumentToES(doc, context) {
             body += chunk;
         });
         httpResp.on('end', function (chunk) {
-            console.log('Response body:', body);  // Print the response body from Elasticsearch/OpenSearch
+            // console.log('Response body:', body);  // Print the response body from Elasticsearch/OpenSearch
+            let _body = JSON.parse(body);
 
-            numDocsAdded ++;
+            numDocsAdded += _body.items.length;
             if (numDocsAdded === totLogLines) {
                 // Mark lambda success.  If not done so, it will be retried.
                 console.log('All ' + numDocsAdded + ' log records added to index ' + index + ' in region ' + region + '.');
@@ -145,36 +155,49 @@ exports.handler = function(event, context) {
     * from S3 to ES.
     * Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
     */
-    var lineStream = new LineStream();
     // A stream of log records, from parsing each log line
-    var recordStream = new stream.Transform({objectMode: true})
-    recordStream._transform = function(line, encoding, done) {
-        let logLine = line.toString();
-        let logRecord;
-        if (logLine.match(/^\{/)) {
-            logRecord = JSON.parse(logLine)
+    const recordStream = new stream.Transform({objectMode: true})
+    recordStream._transform = function(buffer, encoding, done) {
+        let batch = [];
+        for (const line of buffer) {
+            let logLine = line.toString();
+            let logRecord;
+            if (logLine.match(/^\{/)) {
+                logRecord = JSON.parse(logLine)
+                logRecord.old_timestamp = logRecord.timestamp
 
-            if (Number.isInteger(logRecord.timestamp)) {
-                logRecord.timestamp = new Date(logRecord.timestamp)
+                if (Number.isInteger(logRecord.timestamp)) {
+                    logRecord.timestamp = new Date(logRecord.timestamp)
+                } else {
+                    console.log(`Fixing incorrect timestamp ${logRecord.timestamp}`);
+                    logRecord.timestamp = new Date();
+                }
             } else {
-                logRecord.timestamp = new Date()
+                logRecord = parse(logLine);
+                // Prevent "illegal_argument_exception" parsing errors
+                if (logRecord.matched_rule_priority === '-') {
+                    logRecord.matched_rule_priority = 0;
+                }
             }
-        } else {
-            logRecord = parse(logLine);
-            // Prevent "illegal_argument_exception" parsing errors
-            if (logRecord.matched_rule_priority === '-') {
-                logRecord.matched_rule_priority = 0;
-            }
+            let serializedCommand = JSON.stringify({"index": {"_index": index}})
+            batch.push(serializedCommand)
+            let serializedLogRecord = JSON.stringify(logRecord)
+            batch.push(serializedLogRecord)
+            totLogLines ++;
         }
-        let serializedRecord = JSON.stringify(logRecord);
-        this.push(serializedRecord);
-        totLogLines ++;
+        let msg = batch.join("\n")+"\n";
+        // console.log(msg);
+        this.push(msg);
+        console.log(`Parsed ${totLogLines} lines`)
+        done();
+    }
+    recordStream._flush = function(done) {
         done();
     }
 
     event.Records.forEach(function(record) {
-        var bucket = record.s3.bucket.name;
-        var objKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
-        s3LogsToES(bucket, objKey, context, lineStream, recordStream);
+        let bucket = record.s3.bucket.name;
+        let objKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
+        s3LogsToES(bucket, objKey, context, recordStream);
     });
 }

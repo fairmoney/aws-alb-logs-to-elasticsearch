@@ -1,0 +1,37 @@
+{
+  "Records": [
+    {
+      "eventVersion": "2.0",
+      "eventSource": "aws:s3",
+      "awsRegion": "eu-west-1",
+      "eventTime": "1970-01-01T00:00:00.000Z",
+      "eventName": "ObjectCreated:Put",
+      "userIdentity": {
+        "principalId": "AIDAJDPLRKLG7UEXAMPLE"
+      },
+      "requestParameters": {
+        "sourceIPAddress": "127.0.0.1"
+      },
+      "responseElements": {
+        "x-amz-request-id": "C3D13FE58DE4C810",
+        "x-amz-id-2": "FMyUVURIY8/IgAtTv8xRjskZQpcIZ9KG4V5Wp6S7S/JRWeUWerMUE5JgHvANOjpD"
+      },
+      "s3": {
+        "s3SchemaVersion": "1.0",
+        "configurationId": "testConfigRule",
+        "bucket": {
+          "name": "fairmoney-lb-access-logs-non-prod",
+          "ownerIdentity": {
+            "principalId": "b07572cd762c239a8f59a17a6ebe4aa763966747ba1dd4c40708667f358c8adf"
+          },
+          "arn": "arn:aws:s3:::fairmoney-lb-access-logs-non-prod"
+        },
+        "object": {
+          "key": "AWSLogs/027159582536/elasticloadbalancing/eu-west-1/2023/09/01/027159582536_elasticloadbalancing_eu-west-1_app.k8s-appextalpha-7030143c98.9154495dc1ed0921_20230901T0340Z_52.31.217.184_4e0zrmme.log.gz",
+          "size": 1126,
+          "eTag": "0cf29d871ef0d4c50bcf7f2517d5534b"
+        }
+      }
+    }
+  ]
+}
