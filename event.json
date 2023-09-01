@@ -1,35 +1,36 @@
 {
   "Records": [
     {
-      "eventVersion": "2.0",
+      "eventVersion": "2.1",
       "eventSource": "aws:s3",
       "awsRegion": "eu-west-1",
-      "eventTime": "1970-01-01T00:00:00.000Z",
+      "eventTime": "2023-09-01T16:35:06.386Z",
       "eventName": "ObjectCreated:Put",
       "userIdentity": {
-        "principalId": "AIDAJDPLRKLG7UEXAMPLE"
+        "principalId": "AWS:AIDAIC3Q6OY7XTEX2MMHK"
       },
       "requestParameters": {
-        "sourceIPAddress": "127.0.0.1"
+        "sourceIPAddress": "2a05:d018:1629:bb00:e382:e944:8778:daa9"
       },
       "responseElements": {
-        "x-amz-request-id": "C3D13FE58DE4C810",
-        "x-amz-id-2": "FMyUVURIY8/IgAtTv8xRjskZQpcIZ9KG4V5Wp6S7S/JRWeUWerMUE5JgHvANOjpD"
+        "x-amz-request-id": "RWN66KCKH9DT2CAV",
+        "x-amz-id-2": "W2cik0avdDFwqUGwy2RrZ6ebJvmAw6T2nqI9s8nanxk5QMMRaHe9MiJTAjaEkSKygXYV2b/24qn7ytSlP3Y8/eYnm6XNYEFl"
       },
       "s3": {
         "s3SchemaVersion": "1.0",
-        "configurationId": "testConfigRule",
+        "configurationId": "tf-s3-lambda-20230530215556492200000005",
         "bucket": {
-          "name": "fairmoney-lb-access-logs-non-prod",
+          "name": "fairmoney-lb-access-logs-production",
           "ownerIdentity": {
-            "principalId": "b07572cd762c239a8f59a17a6ebe4aa763966747ba1dd4c40708667f358c8adf"
+            "principalId": "A15MN5C9M4SB23"
           },
-          "arn": "arn:aws:s3:::fairmoney-lb-access-logs-non-prod"
+          "arn": "arn:aws:s3:::fairmoney-lb-access-logs-production"
         },
         "object": {
-          "key": "AWSLogs/027159582536/elasticloadbalancing/eu-west-1/2023/09/01/027159582536_elasticloadbalancing_eu-west-1_app.k8s-appextalpha-7030143c98.9154495dc1ed0921_20230901T0340Z_52.31.217.184_4e0zrmme.log.gz",
-          "size": 1126,
-          "eTag": "0cf29d871ef0d4c50bcf7f2517d5534b"
+          "key": "AWSLogs/878858384475/elasticloadbalancing/eu-west-1/2023/09/01/878858384475_elasticloadbalancing_eu-west-1_app.k8s-appext-c139721908.fc2994e15277fbb1_20230901T1635Z_54.78.138.240_1psb6748.log.gz",
+          "size": 2087745,
+          "eTag": "447dbde3f913d841881efee7c328642a",
+          "sequencer": "0064F212BA2FD83936"
         }
       }
     }

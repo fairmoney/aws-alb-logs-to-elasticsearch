@@ -46,8 +46,8 @@ const bulkPath = '_bulk';
 
 /* Globals */
 const s3 = new AWS.S3();
-let totLogLines = 0;    // Total number of log lines in the file
-let numDocsAdded = 0;   // Number of log lines added to ES so far
+let totLogLines = {};    // Total number of log lines in the file
+let numDocsAdded = {};   // Number of log lines added to ES so far
 
 /*
  * The AWS credentials are picked up from the environment.
@@ -64,18 +64,63 @@ console.log('Initializing AWS Lambda Function');
  * Get the log file from the given S3 bucket and key.  Parse it and add
  * each log record to the ES domain.
  */
-function s3LogsToES(bucket, key, context, recordStream) {
+function s3LogsToES(bucket, key, context) {
     // Note: The Lambda function should be configured to filter for .log files
     // (as part of the Event Source "suffix" setting).
     if (!esEndpoint) {
-        var error = new Error('ERROR: Environment variable es_endpoint not set')
+        const error = new Error('ERROR: Environment variable es_endpoint not set')
         context.fail(error);
     }
+
+    // Initialize specific counters
+    totLogLines[key] = 0;
+    numDocsAdded[key] = 0;
 
     const s3Stream = s3.getObject({Bucket: bucket, Key: key}).createReadStream();
     const gunzip = zlib.createGunzip();
     const lineStream = new LineStream();
     const batch = new BatchStream({size: 100});
+
+    const recordStream = new stream.Transform({objectMode: true});
+    recordStream.logLines = 0;
+
+    recordStream._transform = function(buffer, encoding, done) {
+        let batch = [];
+        for (const line of buffer) {
+            let logLine = line.toString();
+            let logRecord;
+            if (logLine.match(/^\{/)) {
+                logRecord = JSON.parse(logLine)
+                logRecord.old_timestamp = logRecord.timestamp
+
+                if (Number.isInteger(logRecord.timestamp)) {
+                    logRecord.timestamp = new Date(logRecord.timestamp)
+                } else {
+                    console.log(`Fixing incorrect timestamp ${logRecord.timestamp}`);
+                    logRecord.timestamp = new Date();
+                }
+            } else {
+                logRecord = parse(logLine);
+                // Prevent "illegal_argument_exception" parsing errors
+                if (logRecord.matched_rule_priority === '-') {
+                    logRecord.matched_rule_priority = 0;
+                }
+            }
+            let serializedCommand = JSON.stringify({"index": {"_index": index}})
+            batch.push(serializedCommand)
+            let serializedLogRecord = JSON.stringify(logRecord)
+            batch.push(serializedLogRecord)
+            this.logLines ++;
+        }
+        let msg = batch.join("\n")+"\n";
+        this.push(msg);
+        done();
+    }
+    recordStream._flush = function(done) {
+        totLogLines[key] = this.logLines;
+        console.log(`Document ${key} has ${totLogLines[key]} records`)
+        done();
+    }
 
     // Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
     s3Stream
@@ -84,13 +129,13 @@ function s3LogsToES(bucket, key, context, recordStream) {
         .pipe(batch)
         .pipe(recordStream)
         .on('data', function(parsedEntry) {
-            postDocumentToES(parsedEntry, context);
+            postDocumentToES(parsedEntry, context, key);
         })
         .on('error', function() {
-            console.log(
+            const error = new Error(
                 'Error getting object "' + key + '" from bucket "' + bucket + '".  ' +
                 'Make sure they exist and your bucket is in the same region as this function.');
-            context.fail();
+            context.fail(error);
         });
 }
 
@@ -99,7 +144,7 @@ function s3LogsToES(bucket, key, context, recordStream) {
  * If all records are successfully added, indicate success to lambda
  * (using the "context" parameter).
  */
-function postDocumentToES(doc, context) {
+function postDocumentToES(doc, context, key) {
     var req = new AWS.HttpRequest(endpoint);
 
     req.method = 'POST';
@@ -130,74 +175,29 @@ function postDocumentToES(doc, context) {
             // console.log('Response body:', body);  // Print the response body from Elasticsearch/OpenSearch
             let _body = JSON.parse(body);
 
-            numDocsAdded += _body.items.length;
-            if (numDocsAdded === totLogLines) {
+            numDocsAdded[key] += _body.items.length;
+            console.log(`Published ${numDocsAdded[key]} of ${totLogLines[key]} documents`)
+            if (numDocsAdded[key] === totLogLines[key]) {
                 // Mark lambda success.  If not done so, it will be retried.
-                console.log('All ' + numDocsAdded + ' log records added to index ' + index + ' in region ' + region + '.');
+                console.log(`All ${numDocsAdded[key]} log records added to index ${index} in region ${region}.`);
                 context.succeed();
             }
         });
     }, function(err) {
-        console.log('Error: ' + err);
-        console.log('Response:', err.response);  // Print the response body from Elasticsearch/OpenSearch
-        console.log(numDocsAdded + 'of ' + totLogLines + ' log records added to ES.');
+        console.log(`Error: ${err}`);
+        console.log(`Response: ${err.response}`);  // Print the response body from Elasticsearch/OpenSearch
+        console.log(`${numDocsAdded[key]}  of ${totLogLines[key]}  log records added to ES.`);
         context.fail();
     });
 }
 
 /* Lambda "main": Execution starts here */
 exports.handler = function(event, context) {
-    console.log('Received event: ', JSON.stringify(event, null, 2));
-
-    /* == Streams ==
-    * To avoid loading an entire (typically large) log file into memory,
-    * this is implemented as a pipeline of filters, streaming log data
-    * from S3 to ES.
-    * Flow: S3 file stream -> Log Line stream -> Log Record stream -> ES
-    */
-    // A stream of log records, from parsing each log line
-    const recordStream = new stream.Transform({objectMode: true})
-    recordStream._transform = function(buffer, encoding, done) {
-        let batch = [];
-        for (const line of buffer) {
-            let logLine = line.toString();
-            let logRecord;
-            if (logLine.match(/^\{/)) {
-                logRecord = JSON.parse(logLine)
-                logRecord.old_timestamp = logRecord.timestamp
-
-                if (Number.isInteger(logRecord.timestamp)) {
-                    logRecord.timestamp = new Date(logRecord.timestamp)
-                } else {
-                    console.log(`Fixing incorrect timestamp ${logRecord.timestamp}`);
-                    logRecord.timestamp = new Date();
-                }
-            } else {
-                logRecord = parse(logLine);
-                // Prevent "illegal_argument_exception" parsing errors
-                if (logRecord.matched_rule_priority === '-') {
-                    logRecord.matched_rule_priority = 0;
-                }
-            }
-            let serializedCommand = JSON.stringify({"index": {"_index": index}})
-            batch.push(serializedCommand)
-            let serializedLogRecord = JSON.stringify(logRecord)
-            batch.push(serializedLogRecord)
-            totLogLines ++;
-        }
-        let msg = batch.join("\n")+"\n";
-        // console.log(msg);
-        this.push(msg);
-        console.log(`Parsed ${totLogLines} lines`)
-        done();
-    }
-    recordStream._flush = function(done) {
-        done();
-    }
+    console.log(`Received event: ${JSON.stringify(event, null, 2)}`);
 
     event.Records.forEach(function(record) {
         let bucket = record.s3.bucket.name;
         let objKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
-        s3LogsToES(bucket, objKey, context, recordStream);
+        s3LogsToES(bucket, objKey, context);
     });
 }
