@@ -6,15 +6,26 @@
     {
       "name": "Oleksandr Mykhalchuk",
       "email": "mykhalchuk.oleksandr@gmail.com"
+    },
+    {
+      "name": "Cristian Andrei Calin",
+      "email": "cristian.calin@fairmoney.io"
     }
   ],
   "dependencies": {
     "alb-log-parser": "0.0.8",
-    "aws-sdk": "^2.1091.0",
-    "byline": "4.2.1",
-    "path": "0.12.7",
-    "stream": "0.0.2"
+    "aws-sdk": "^2.1449.0",
+    "batch-stream": "^0.1.3",
+    "byline": "^4.2.1",
+    "path": "^0.12.7",
+    "stream": "^0.0.2"
   },
   "repository": "https://github.com/blmr/aws-elb-logs-to-elasticsearch.git",
-  "license": "Amazon Software License"
+  "license": "Amazon Software License",
+  "scripts": {
+    "locally": "node -e \"console.log(require('./index').handler(require('./event.json'),require('aws-lambda-mock-context')({'timeout':50})));\""
+  },
+  "devDependencies": {
+    "aws-lambda-mock-context": "^3.2.1"
+  }
 }
