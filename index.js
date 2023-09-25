@@ -81,6 +81,9 @@ function s3LogsToES(bucket, key, context) {
     const lineStream = new LineStream();
     const batch = new BatchStream({size: 100});
 
+    // Extract the object.key prefix
+    const key_prefix = key.split('/')[0]; // Assuming the prefix is the first segment
+
     const recordStream = new stream.Transform({objectMode: true});
     recordStream.logLines = 0;
 
@@ -104,6 +107,11 @@ function s3LogsToES(bucket, key, context) {
                 // Prevent "illegal_argument_exception" parsing errors
                 if (logRecord.matched_rule_priority === '-') {
                     logRecord.matched_rule_priority = 0;
+                }
+                //Check if the prefix is other than AWSLogs, which means no prefix
+                if (key_prefix !== 'AWSLogs') {
+                  // Add the 'cluster_name' key-value pair
+                  logRecord.cluster_name = key_prefix;
                 }
             }
             let serializedCommand = JSON.stringify({"index": {"_index": index}})
