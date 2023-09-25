@@ -105,6 +105,13 @@ function s3LogsToES(bucket, key, context) {
                 if (logRecord.matched_rule_priority === '-') {
                     logRecord.matched_rule_priority = 0;
                 }
+                 // Extract the object.key prefix
+                let key_prefix = key.split('/')[0]; // Assuming the prefix is the first segment
+                //Check if the prefix is other than AWSLogs, which means no prefix
+                if (key_prefix !== 'AWSLogs') {
+                  // Add the 'cluster_name' key-value pair
+                  logRecord.cluster_name = key_prefix;
+                }
             }
             let serializedCommand = JSON.stringify({"index": {"_index": index}})
             batch.push(serializedCommand)
